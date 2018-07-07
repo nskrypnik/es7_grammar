@@ -30,6 +30,8 @@ importStatement = Keyword('import') + imported + Keyword('from') + \
 
 # --------------------------------------------------------------------------------------
 
+HexIntegerLiteral = Literal('0') + oneOf('x X') + Word(srange('[a-f0-9]'))
+
 ExponentPart = oneOf('e E') + oneOf('+ -')*(0, 1) + Word(nums)
 
 DecimalLiteral = (Word(nums) + '.' + Word(nums) + ExponentPart*(0, 1) | \
@@ -37,7 +39,7 @@ DecimalLiteral = (Word(nums) + '.' + Word(nums) + ExponentPart*(0, 1) | \
                  Word(nums) + ExponentPart*(0, 1) | \
                  Word(nums))
 
-NumericLiteral = DecimalLiteral # | HexIntegerLiteral
+NumericLiteral = HexIntegerLiteral | DecimalLiteral
 
 # --------------------------------------------------------------------------------------
 
