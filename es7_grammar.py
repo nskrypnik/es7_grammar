@@ -2,7 +2,7 @@ from pyparsing import *
 
 # Common literals declarations
 
-LBR, RBR, QUOT, COLMN, SEMI, COMMA, EQL, LSB, RSB, \
+LCBR, RCBR, QUOT, COLMN, SEMI, COMMA, EQL, LSB, RSB, \
 DOT, LB, RB, QUES,  = map(Literal, '{}\':;,=[].()?')
 
 OR, AND, OR_BITW, AND_BITW, XOR = map(Literal, ['||', '&&', '|', '&', '^'])
@@ -11,24 +11,43 @@ OR, AND, OR_BITW, AND_BITW, XOR = map(Literal, ['||', '&&', '|', '&', '^'])
 
 # common statement
 
-simpleVarName = Word(alphas + "_", alphanums + "_")
+Identifier = Word(alphas + "_$", alphanums + "_$") # Identifier in javascript_grammar.g
 
+
+# here should go destruction declarations
 hashUnpack = Forward()
 
-hashUnpackGroup = (simpleVarName + COLMN + hashUnpack)| simpleVarName
+hashUnpackGroup = (Identifier + COLMN + hashUnpack)| Identifier
 
-hashUnpack <<= LBR + hashUnpackGroup + ZeroOrMore(COMMA + hashUnpackGroup) + RBR
+hashUnpack <<= LCBR + hashUnpackGroup + ZeroOrMore(COMMA + hashUnpackGroup) + RCBR
+
+# --------------------------------------------------------------------------------------
+# this guys is an essential to many expressions
+
+assignmentExpression = Forward()
+
+functionDeclaration = Forward()
+
+statement = Forward()
+
+sourceElement = Forward()
+
+# --------------------------------------------------------------------------------------
+sourceElements = sourceElement + ZeroOrMore(sourceElement)
+
+sourceElement = functionDeclaration | statement
 
 # --------------------------------------------------------------------------------------
 # import statement
 
-imported = simpleVarName + COMMA + hashUnpack| \
-            simpleVarName
+imported = Identifier + COMMA + hashUnpack| \
+            Identifier
 
 importStatement = Keyword('import') + imported + Keyword('from') + \
                     quotedString + Optional(SEMI)
 
 # --------------------------------------------------------------------------------------
+# Numeric literal
 
 HexIntegerLiteral = Literal('0') + oneOf('x X') + Word(srange('[a-f0-9]'))
 
@@ -42,36 +61,71 @@ DecimalLiteral = (Word(nums) + '.' + Word(nums) + ExponentPart*(0, 1) | \
 NumericLiteral = HexIntegerLiteral | DecimalLiteral
 
 # --------------------------------------------------------------------------------------
+# Literals
 
-functionExpression = Forward() # TODO: this is a dummy
+ArrayLiteral = LSB + assignmentExpression*(0, 1) + ZeroOrMore(COMMA + assignmentExpression) + RSB
 
-memberExpressionSuffix = Forward() # TODO: this is a dummy
+computedPropertyKeys = LSB + assignmentExpression + RSB # es6 computed property keys
 
-assignmentExpression = Forward()
+propertyName = Identifier | \
+               quotedString | \
+               NumericLiteral | \
+               computedPropertyKeys
+
+propertyNameAndValue = propertyName + COLMN + assignmentExpression
+
+# TODO: test here case for '{}'
+ObjectLiteral = LCBR + propertyNameAndValue*(0, 1) + ZeroOrMore(COMMA + propertyNameAndValue) + RCBR
+
+# --------------------------------------------------------------------------------------
+# functions
+
+functionBody = LCBR + sourceElements*(0, 1) + RCBR
+
+parameterDeclaration = Identifier + (EQL + assignmentExpression)*(0, 1)
+
+parameterList = parameterDeclaration*(0, 1) + ZeroOrMore(COMMA + parameterDeclaration) | \
+                Literal('...') + Identifier
+
+formalParameterList = LB +  + RB
+
+functionExpression = (Keyword('function') + Identifier*(0, 1) + formalParameterList + functionBody) | \
+                    (formalParameterList + Literal('=>') + functionBody)
+
+functionDeclaration = Keyword('function') + Identifier + formalParameterList + functionBody
 
 funcArguments = LB + assignmentExpression + ZeroOrMore(COMMA + assignmentExpression) + RB
+
+# --------------------------------------------------------------------------------------
 
 expression = assignmentExpression + ZeroOrMore(COMMA + assignmentExpression)
 
 indexSuffix = LSB + expression + RSB
 
-propertyReferenceSuffix = DOT + simpleVarName
+propertyReferenceSuffix = DOT + Identifier
 
+memberExpressionSuffix = indexSuffix | propertyReferenceSuffix
+
+# in lieu of literal in javascript_grammar.g
 jsLiteral = Keyword('null') | \
           Keyword('true') | \
           Keyword('false') | \
           quotedString | \
-          NumericLiteral
+          NumericLiteral | \
+          ArrayLiteral | \
+          ObjectLiteral
+          # TODO: add es6 template here
 
 primaryExpression = Keyword('this') | \
-                    simpleVarName | \
-                    jsLiteral # TODO: more goes here
+                    Identifier | \
+                    jsLiteral | \
+                    LB + expression + RB
 
 memberExpression = Forward()
 
-memberExpression <<= (primaryExpression | functionExpression | \
-                    Keyword('new') + memberExpression + funcArguments) \
-                    + memberExpressionSuffix
+memberExpression <<= ((Keyword('new') + memberExpression + funcArguments) | \
+                    primaryExpression | functionExpression) \
+                    + ZeroOrMore(memberExpressionSuffix)
 
 callExpressionSuffix = funcArguments | indexSuffix | propertyReferenceSuffix
 
@@ -116,18 +170,106 @@ logicalORExpression = logicalANDExpression + ZeroOrMore(OR + logicalANDExpressio
 
 conditionalExpression = logicalORExpression + (QUES + assignmentExpression + COLMN + assignmentExpression)*(0, 1)
 
-assignmentExpression <<= conditionalExpression| \
-                        (leftHandSideExpression + oneOf('= *= /= %= += -= <<= >>= >>>= &= ^= |=') \
-                            + assignmentExpression)
+assignmentExpression <<= (leftHandSideExpression + oneOf('= *= /= %= += -= <<= >>= >>>= &= ^= |=') \
+                        + assignmentExpression) | conditionalExpression
 
-variableDeclaration = simpleVarName + EQL + assignmentExpression
+variableDeclaration = Identifier + EQL + assignmentExpression
 
 variableDeclarationList = variableDeclaration + ZeroOrMore(COMMA + variableDeclaration)
 
-variableStatement = variableDeclarationList + Optional(SEMI)
 
-# assign statements
+variableStatement = Keyword('var') + variableDeclarationList + Optional(SEMI)
 
-constStatement = Keyword('const') + variableStatement
+constStatement = Keyword('const') + variableDeclarationList + Optional(SEMI)
 
-letStatement = Keyword('let') + variableStatement
+letStatement = Keyword('let') + variableDeclarationList + Optional(SEMI)
+
+# ------------------------------------------------------------------------------
+# JS statements
+
+statement = Forward()
+
+expression = assignmentExpression + ZeroOrMore(COMMA + assignmentExpression)
+
+doWhileStatement = Keyword('do') + statement Keyword('while') + LB + expression + RB + SEMI*(0, 1)
+
+whileStatement = Keyword('while') + LB + espression + RB + statement + SEMI*(0, 1)
+
+forStatementInitialiserPart = (Keyword('var') | Keyword('let')) + variableDeclarationList
+
+forStatement = Keyword('for') + \
+               LB + forStatementInitialiserPart*(0, 1) + \
+               SEMI + expression*(0, 1) + \
+               SEMI + expression*(0, 1) + RB + \
+               statement
+
+forInStatementInitialiserPart = leftHandSideExpression | (Keyword('var') + variableDeclaration)
+
+forInStatement = Keyword('for') + LB forInStatementInitialiserPart + Keyword('in') + expression + RB + statement
+
+iterationStatement = doWhileStatement \
+                     | whileStatement \
+                     | forInStatement \
+                     | forStatement
+
+
+ifStatement = Keyword('if') + LB + expression + RB + statement + \
+                Keyword('else') + statement
+
+expressionStatement = expression + SEMI*(0, 1)
+
+emptyStatement = SEMI
+
+statementList = statement + ZeroOrMore(statement)
+
+statementBlock = LCBR + statementList*(0, 1) + RCBR
+
+continueStatement = Keyword('continue') + Identifier*(0, 1) + SEMI*(0, 1)
+
+breakStatement = Keyword('break') + Identifier*(0, 1) + SEMI*(0, 1)
+
+returnStatement = Keyword('return') + expression*(0, 1) + SEMI*(0, 1)
+
+withStatement = Keyword('with') + LB + expression + RB + statement
+
+labelledStatement = Identifier + COLMN + statement
+
+defaultClause = Keyword('default') + COLMN + statementList*(0, 1)
+
+caseClause = Keyword('case') + expression + COLMN + statementList*(0, 1)
+
+caseBlock = LCBR + ZeroOrMore(caseClause) + (defaultClause + ZeroOrMore(caseClause))*(0, 1) + RCBR
+
+switchStatement = Keyword('switch') + LB + expression + RB + caseBlock
+
+throwStatement = Keyword('throw') + expression + SEMI(0, 1)
+
+# ------------------------------------------------------------------------------
+# Try statements
+
+catchClause = Keyword('catch') + LB + Identifier + RB + statementBlock
+
+finallyClause = Keyword('finally') + statementBlock
+
+tryStatement = Keyword('try') + statementBlock + (finallyClause | (catchClause + finallyClause*(0, 1)))
+
+# ------------------------------------------------------------------------------
+
+
+statement = statementBlock | \
+            constStatement | \
+            letStatement | \
+            importStatement | \
+            variableStatement | \
+            emptyStatement | \
+            expressionStatement | \
+            ifStatement | \
+            iterationStatement | \
+            continueStatement | \
+            breakStatement | \
+            returnStatement | \
+            withStatement | \
+            labelledStatement | \
+            switchStatement | \
+            throwStatement | \
+            tryStatement
