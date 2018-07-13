@@ -13,14 +13,6 @@ OR, AND, OR_BITW, AND_BITW, XOR = map(Literal, ['||', '&&', '|', '&', '^'])
 
 Identifier = Word(alphas + "_$", alphanums + "_$") # Identifier in javascript_grammar.g
 
-
-# here should go destruction declarations
-hashUnpack = Forward()
-
-hashUnpackGroup = (Identifier + COLMN + hashUnpack)| Identifier
-
-hashUnpack <<= LCBR + hashUnpackGroup + ZeroOrMore(COMMA + hashUnpackGroup) + RCBR
-
 # --------------------------------------------------------------------------------------
 # this guys is an essential to many expressions
 
@@ -33,14 +25,41 @@ statement = Forward()
 sourceElement = Forward()
 
 # --------------------------------------------------------------------------------------
+# Destructing assignment
+
+destructObject = Forward()
+
+destructArray = Forward()
+
+destructAssignmentKey = (LSB + assignmentExpression + RSB) | Identifier
+
+destructAssignmentKeyWithDefault = (destructAssignmentKey + EQL + assignmentExpression) | \
+                                   destructAssignmentKey
+
+forwardingDestructEl = destructAssignmentKey + COLMN + \
+                       ((destructObject | destructArray) | destructAssignmentKeyWithDefault)
+
+destructAssignmentEl = forwardingDestructEl | destructAssignmentKeyWithDefault
+
+destructArrayEl = destructObject | destructArray | destructAssignmentKey
+
+destructArray <<= LSB + destructArrayEl + ZeroOrMore(COMMA + destructArrayEl) + RSB
+
+destructObject <<= LCBR + \
+                      destructAssignmentEl + ZeroOrMore(COMMA + destructAssignmentEl) + \
+                    RCBR
+
+destructAssignment = destructObject | destructArray
+
+# --------------------------------------------------------------------------------------
 sourceElements = sourceElement + ZeroOrMore(sourceElement)
 
-sourceElement = functionDeclaration | statement
+sourceElement <<= functionDeclaration | statement
 
 # --------------------------------------------------------------------------------------
 # import statement
 
-imported = Identifier + COMMA + hashUnpack| \
+imported = (Identifier + COMMA + destructAssignment) | \
             Identifier
 
 importStatement = Keyword('import') + imported + Keyword('from') + \
@@ -82,17 +101,20 @@ ObjectLiteral = LCBR + propertyNameAndValue*(0, 1) + ZeroOrMore(COMMA + property
 
 functionBody = LCBR + sourceElements*(0, 1) + RCBR
 
+# EQL + assignmentExpression part is for default values
 parameterDeclaration = Identifier + (EQL + assignmentExpression)*(0, 1)
 
-parameterList = parameterDeclaration*(0, 1) + ZeroOrMore(COMMA + parameterDeclaration) | \
-                Literal('...') + Identifier
+parameterListOptions = parameterDeclaration*(0, 1) + ZeroOrMore(COMMA + parameterDeclaration) | \
+                destructAssignment | \
+                Literal('...') + Identifier # later is for cases like `function (...params) {}`
 
-formalParameterList = LB +  + RB
+formalParameterList = LB + parameterListOptions + RB
 
 functionExpression = (Keyword('function') + Identifier*(0, 1) + formalParameterList + functionBody) | \
-                    (formalParameterList + Literal('=>') + functionBody)
+                    (formalParameterList + Literal('=>') + functionBody) | \
+                    (Identifier + Literal('=>') + functionBody)
 
-functionDeclaration = Keyword('function') + Identifier + formalParameterList + functionBody
+functionDeclaration <<= Keyword('function') + Identifier + formalParameterList + functionBody
 
 funcArguments = LB + assignmentExpression + ZeroOrMore(COMMA + assignmentExpression) + RB
 
@@ -144,7 +166,7 @@ postfixExpression = leftHandSideExpression + oneOf('++ --')*(0, 1)
 
 unaryExpression = Forward()
 
-unaryExpression = postfixExpression | (oneOf('delete void typeof ++ -- + - ~ !') + unaryExpression)
+unaryExpression <<= postfixExpression | (oneOf('delete void typeof ++ -- + - ~ !') + unaryExpression)
 
 multiplicativeExpression = unaryExpression + ZeroOrMore(oneOf('* / %') + unaryExpression)
 
@@ -173,7 +195,7 @@ conditionalExpression = logicalORExpression + (QUES + assignmentExpression + COL
 assignmentExpression <<= (leftHandSideExpression + oneOf('= *= /= %= += -= <<= >>= >>>= &= ^= |=') \
                         + assignmentExpression) | conditionalExpression
 
-variableDeclaration = Identifier + EQL + assignmentExpression
+variableDeclaration = (destructAssignment | Identifier) + EQL + assignmentExpression
 
 variableDeclarationList = variableDeclaration + ZeroOrMore(COMMA + variableDeclaration)
 
@@ -187,13 +209,11 @@ letStatement = Keyword('let') + variableDeclarationList + Optional(SEMI)
 # ------------------------------------------------------------------------------
 # JS statements
 
-statement = Forward()
-
 expression = assignmentExpression + ZeroOrMore(COMMA + assignmentExpression)
 
-doWhileStatement = Keyword('do') + statement Keyword('while') + LB + expression + RB + SEMI*(0, 1)
+doWhileStatement = Keyword('do') + statement + Keyword('while') + LB + expression + RB + SEMI*(0, 1)
 
-whileStatement = Keyword('while') + LB + espression + RB + statement + SEMI*(0, 1)
+whileStatement = Keyword('while') + LB + expression + RB + statement + SEMI*(0, 1)
 
 forStatementInitialiserPart = (Keyword('var') | Keyword('let')) + variableDeclarationList
 
@@ -205,7 +225,7 @@ forStatement = Keyword('for') + \
 
 forInStatementInitialiserPart = leftHandSideExpression | (Keyword('var') + variableDeclaration)
 
-forInStatement = Keyword('for') + LB forInStatementInitialiserPart + Keyword('in') + expression + RB + statement
+forInStatement = Keyword('for') + LB + forInStatementInitialiserPart + Keyword('in') + expression + RB + statement
 
 iterationStatement = doWhileStatement \
                      | whileStatement \
@@ -242,7 +262,7 @@ caseBlock = LCBR + ZeroOrMore(caseClause) + (defaultClause + ZeroOrMore(caseClau
 
 switchStatement = Keyword('switch') + LB + expression + RB + caseBlock
 
-throwStatement = Keyword('throw') + expression + SEMI(0, 1)
+throwStatement = Keyword('throw') + expression + SEMI*(0, 1)
 
 # ------------------------------------------------------------------------------
 # Try statements
@@ -256,7 +276,7 @@ tryStatement = Keyword('try') + statementBlock + (finallyClause | (catchClause +
 # ------------------------------------------------------------------------------
 
 
-statement = statementBlock | \
+statement <<= statementBlock | \
             constStatement | \
             letStatement | \
             importStatement | \
@@ -273,3 +293,17 @@ statement = statementBlock | \
             switchStatement | \
             throwStatement | \
             tryStatement
+            # TODO: add class statement
+
+# set name for every statement in the grammar
+
+def name_grammar_rules(grammar_locals):
+    import pyparsing
+    exclude_list = dir(pyparsing)
+    exclude_list += ['name_grammar_rules', '__annotations__']
+    exclude_set = set(exclude_list)
+    for grammar_rule_name, grammar_rule in grammar_locals.items():
+        if not grammar_rule_name in exclude_set:
+            grammar_rule.setName(grammar_rule_name)
+
+name_grammar_rules(locals())
